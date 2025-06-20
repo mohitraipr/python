@@ -1,7 +1,16 @@
+"""Automation tool for updating Flipkart settlement prices.
+
+The script drives a headless Chrome instance via Selenium to update the
+settlement price for SKUs listed in an Excel sheet. A brief pause is
+introduced on startup so that the user can log in if required.
+
+Run ``python flipkartpricing.py --help`` for available command line options.
+"""
+
 import os
 import time
 import logging
-import math
+import argparse
 
 import pandas as pd
 from selenium import webdriver
@@ -35,12 +44,14 @@ logging.basicConfig(
 )
 
 class PriceUpdateBot:
-    def __init__(self):
+    def __init__(self, excel_path=EXCEL_PATH, login_wait=60, headless=True):
+        self.excel_path = excel_path
         os.makedirs(SELENIUM_PROFILE, exist_ok=True)
 
         opts = Options()
         opts.add_argument(f"--user-data-dir={SELENIUM_PROFILE}")
-        opts.add_argument("--headless=new")
+        if headless:
+            opts.add_argument("--headless=new")
         opts.add_argument("--disable-blink-features=AutomationControlled")
         opts.add_argument("--password-store=basic")
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -52,8 +63,10 @@ class PriceUpdateBot:
         self.driver = webdriver.Chrome(service=service, options=opts)
         self.wait   = WebDriverWait(self.driver, WAIT_TIMEOUT)
 
-        logging.info("🔑 If first run, please log in within 60 seconds…")
-        time.sleep(60)
+        logging.info(
+            f"🔑 If first run, please log in within {login_wait} seconds…"
+        )
+        time.sleep(login_wait)
 
     def _click(self, el):
         self.driver.execute_script("arguments[0].scrollIntoView({block:'center'})", el)
@@ -114,7 +127,9 @@ class PriceUpdateBot:
             logging.error(f"❌ Failed on {sku}: {e}", exc_info=True)
 
     def run(self):
-        df = pd.read_excel(EXCEL_PATH, dtype={"SKU": str, "FinalPrice": float})
+        df = pd.read_excel(
+            self.excel_path, dtype={"SKU": str, "FinalPrice": float}
+        )
         for _, r in df.iterrows():
             self.update_price_for(r["SKU"].strip(), float(r["FinalPrice"]))
 
@@ -122,9 +137,36 @@ class PriceUpdateBot:
         logging.info("Closing Chrome…")
         self.driver.quit()
 
-if __name__ == "__main__":
-    bot = PriceUpdateBot()
+def main():
+    parser = argparse.ArgumentParser(description="Update Flipkart settlement prices")
+    parser.add_argument(
+        "--excel",
+        default=EXCEL_PATH,
+        help="Path to Excel file with SKU and FinalPrice columns",
+    )
+    parser.add_argument(
+        "--login-wait",
+        type=int,
+        default=60,
+        help="Seconds to pause for manual login",
+    )
+    parser.add_argument(
+        "--no-headless",
+        action="store_true",
+        help="Run Chrome with a visible window",
+    )
+    args = parser.parse_args()
+
+    bot = PriceUpdateBot(
+        excel_path=args.excel,
+        login_wait=args.login_wait,
+        headless=not args.no_headless,
+    )
     try:
         bot.run()
     finally:
         bot.quit()
+
+
+if __name__ == "__main__":
+    main()
